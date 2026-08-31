@@ -91,7 +91,7 @@ The extension currently provides blocks for:
 - Division
 - Exponentiation
 - Powers of 10
-- `log10`
+- Log 10
 - Comparisons
 - Equality
 - Absolute value
