@@ -1,7 +1,7 @@
 // Name: Break Infinity
 // ID: breakinfinity
-// Description: Extension for mathematic notations, with 'e'.
-// By: zHerosK
+// Description: Extension for handling large numbers using 'e' notation.
+// By: zHerosK <https://scratch.mit.edu/users/zHerosK/>
 // License: MIT
 
 (function (Scratch) {
@@ -249,36 +249,81 @@
             };
         }
 
-        create(sign, mantissa, height, exponent) {
+        /*
+         * Representation:
+         *
+         * sign × mantissa × 10^exponent
+         *
+         * exponent is itself another Break Infinity number.
+         *
+         * Examples:
+         *
+         *  5
+         *  2e100
+         *  1ee8
+         *  2ee100
+         *  1e3e8
+         */
+
+        create(sign, mantissa, exponent) {
             return {
-                sign: sign,
-                mantissa: mantissa,
-                height: height,
-                exponent: exponent
+                sign,
+                mantissa,
+                exponent
             };
         }
 
         zero() {
-            return this.create(0, 0, 0, 0);
+            return this.create(0, 0, null);
+        }
+
+        one() {
+            return this.create(1, 1, null);
         }
 
         clone(x) {
+            if (!x) return null;
+
             return this.create(
                 x.sign,
                 x.mantissa,
-                x.height,
-                x.exponent
+                x.exponent === null
+                    ? null
+                    : this.clone(x.exponent)
             );
         }
 
         isZero(x) {
-            return x.sign === 0 || x.mantissa === 0;
+            return (
+                !x ||
+                x.sign === 0 ||
+                x.mantissa === 0
+            );
         }
 
-        parse(input) {
-            let s = String(input).trim();
+        /*
+         * ---------------------------------------------------------
+         * Parsing
+         * ---------------------------------------------------------
+         */
 
-            if (s === '') {
+        parse(input) {
+            if (
+                input &&
+                typeof input === 'object' &&
+                typeof input.sign === 'number'
+            ) {
+                return this.normalize(
+                    this.clone(input)
+                );
+            }
+
+            let s =
+                String(input)
+                    .trim()
+                    .replace(/E/g, 'e');
+
+            if (!s) {
                 return this.zero();
             }
 
@@ -291,272 +336,560 @@
                 s = s.slice(1);
             }
 
-            s = s.replace(/E/g, 'e');
-
-            if (s === '' || s === '0') {
+            if (!s || s === '0') {
                 return this.zero();
             }
 
-            const firstE = s.indexOf('e');
+            return this.parsePositive(
+                s,
+                sign
+            );
+        }
 
-            if (firstE === -1) {
-                const n = Number(s);
+        parsePositive(s, sign = 1) {
+            const e =
+                s.indexOf('e');
 
-                if (!Number.isFinite(n) || n === 0) {
+            /*
+             * No e => ordinary number.
+             */
+            if (e === -1) {
+                const n =
+                    Number(s);
+
+                if (
+                    !Number.isFinite(n) ||
+                    n === 0
+                ) {
                     return this.zero();
                 }
 
-                return this.normalize({
-                    sign: sign * (n < 0 ? -1 : 1),
-                    mantissa: Math.abs(n),
-                    height: 0,
-                    exponent: 0
-                });
+                return this.fromNumber(
+                    sign * n
+                );
             }
 
-            const mantissaText = s.slice(0, firstE);
-            const rest = s.slice(firstE);
+            /*
+             * Everything before the first e is the mantissa.
+             */
+            let mantissaText =
+                s.slice(0, e);
 
-            const mantissa = Number(mantissaText);
-
-            if (!Number.isFinite(mantissa) || mantissa === 0) {
-                return this.zero();
+            /*
+             * An empty mantissa means 1.
+             *
+             * Therefore:
+             *
+             *     ee8
+             *
+             * is interpreted as:
+             *
+             *     1e(1e8)
+             */
+            if (mantissaText === '') {
+                mantissaText = '1';
             }
 
-            let eCount = 0;
+            const mantissa =
+                Number(mantissaText);
 
-            while (
-                eCount < rest.length &&
-                rest[eCount] === 'e'
+            if (
+                !Number.isFinite(mantissa) ||
+                mantissa === 0
             ) {
-                eCount++;
-            }
-
-            const exponentText = rest.slice(eCount);
-
-            const exponent = Number(exponentText);
-
-            if (!Number.isFinite(exponent)) {
                 return this.zero();
             }
 
-            return this.normalize({
-                sign: sign * (mantissa < 0 ? -1 : 1),
-                mantissa: Math.abs(mantissa),
-                height: eCount,
-                exponent: exponent
-            });
+            const rest =
+                s.slice(e + 1);
+
+            /*
+             * An empty exponent means 1.
+             *
+             * This makes:
+             *
+             *     1e
+             *
+             * equivalent to 1e1.
+             *
+             * We can alternatively reject it, but accepting it
+             * keeps the grammar consistent.
+             */
+            const exponent =
+                rest === ''
+                    ? this.one()
+                    : this.parseExponent(rest);
+
+            if (!exponent) {
+                return this.zero();
+            }
+
+            return this.normalize(
+                this.create(
+                    sign *
+                    (mantissa < 0 ? -1 : 1),
+                    Math.abs(mantissa),
+                    exponent
+                )
+            );
         }
 
+        parseExponent(s) {
+            s =
+                String(s)
+                    .trim()
+                    .replace(/E/g, 'e');
+
+            if (!s) {
+                return this.one();
+            }
+
+            /*
+             * If it begins with e, its mantissa is implicitly 1.
+             *
+             *     e8
+             *
+             * means:
+             *
+             *     1e8
+             */
+            if (s[0] === 'e') {
+                return this.parsePositive(
+                    '1' + s,
+                    1
+                );
+            }
+
+            return this.parsePositive(
+                s,
+                1
+            );
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * Conversion
+         * ---------------------------------------------------------
+         */
+
+        fromNumber(n) {
+            if (
+                !Number.isFinite(n) ||
+                n === 0
+            ) {
+                return this.zero();
+            }
+
+            const sign =
+                n < 0 ? -1 : 1;
+
+            const abs =
+                Math.abs(n);
+
+            /*
+             * Keep normal numbers as normal numbers.
+             */
+            if (
+                abs >= 1e-6 &&
+                abs < 1e21
+            ) {
+                return this.create(
+                    sign,
+                    abs,
+                    null
+                );
+            }
+
+            const exponent =
+                Math.floor(
+                    Math.log10(abs)
+                );
+
+            const mantissa =
+                abs /
+                Math.pow(
+                    10,
+                    exponent
+                );
+
+            return this.create(
+                sign,
+                mantissa,
+                this.fromNumber(
+                    exponent
+                )
+            );
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * Normalization
+         * ---------------------------------------------------------
+         */
+
         normalize(x) {
-            if (!x || !Number.isFinite(x.mantissa)) {
+            if (!x) {
                 return this.zero();
             }
 
-            if (x.mantissa === 0 || x.sign === 0) {
+            if (
+                x.sign === 0 ||
+                x.mantissa === 0 ||
+                !Number.isFinite(x.mantissa)
+            ) {
                 return this.zero();
             }
 
-            x.sign = x.sign < 0 ? -1 : 1;
-            x.mantissa = Math.abs(x.mantissa);
+            x.sign =
+                x.sign < 0
+                    ? -1
+                    : 1;
 
-            if (x.height === 0) {
+            x.mantissa =
+                Math.abs(x.mantissa);
+
+            /*
+             * Normal number.
+             */
+            if (x.exponent === null) {
+                if (
+                    x.mantissa >= 1e21 ||
+                    x.mantissa < 1e-6
+                ) {
+                    return this.fromNumber(
+                        x.sign *
+                        x.mantissa
+                    );
+                }
+
                 return x;
             }
 
-            const shift = Math.floor(
-                Math.log10(x.mantissa)
-            );
+            x.exponent =
+                this.normalize(
+                    x.exponent
+                );
+
+            /*
+             * x × 10^0 = x
+             *
+             * This fixes:
+             *
+             *     1e0 -> 1
+             *     2e0 -> 2
+             */
+            if (
+                this.isZero(
+                    x.exponent
+                )
+            ) {
+                return this.create(
+                    x.sign,
+                    x.mantissa,
+                    null
+                );
+            }
+
+            /*
+             * Normalize mantissa to [1, 10).
+             */
+            const shift =
+                Math.floor(
+                    Math.log10(
+                        x.mantissa
+                    )
+                );
 
             if (shift !== 0) {
-                x.mantissa /= Math.pow(10, shift);
+                x.mantissa /=
+                    Math.pow(
+                        10,
+                        shift
+                    );
 
-                if (x.height === 1) {
-                    x.exponent += shift;
-                }
+                x.exponent =
+                    this.add(
+                        x.exponent,
+                        this.fromNumber(
+                            shift
+                        )
+                    );
             }
 
             return x;
         }
 
-        format(x) {
-            x = this.clone(x);
-
-            if (this.isZero(x)) {
-                return '0';
-            }
-
-            const sign =
-                x.sign < 0 ? '-' : '';
-
-            if (x.height === 0) {
-                let n = x.sign * x.mantissa;
-
-                if (
-                    Number.isFinite(n) &&
-                    Number.isInteger(n)
-                ) {
-                    return String(n);
-                }
-
-                return String(n);
-            }
-
-            let m = Number(
-                x.mantissa.toPrecision(15)
-            ).toString();
-
-            return (
-                sign +
-                m +
-                'e'.repeat(x.height) +
-                String(x.exponent)
-            );
-        }
-
-        toNumber(x) {
-            x = this.parse(x);
-
-            if (this.isZero(x)) {
-                return 0;
-            }
-
-            if (x.height === 0) {
-                return x.sign * x.mantissa;
-            }
-
-            if (x.height > 1) {
-                return x.sign > 0
-                    ? Infinity
-                    : -Infinity;
-            }
-
-            const e = x.exponent;
-
-            if (e > 308) {
-                return x.sign > 0
-                    ? Infinity
-                    : -Infinity;
-            }
-
-            if (e < -324) {
-                return 0;
-            }
-
-            return (
-                x.sign *
-                x.mantissa *
-                Math.pow(10, e)
-            );
-        }
+        /*
+         * ---------------------------------------------------------
+         * Comparison
+         * ---------------------------------------------------------
+         */
 
         compare(a, b) {
             a = this.parse(a);
             b = this.parse(b);
 
             if (a.sign !== b.sign) {
-                return a.sign > b.sign ? 1 : -1;
+                return a.sign > b.sign
+                    ? 1
+                    : -1;
             }
 
             if (a.sign === 0) {
                 return 0;
             }
 
-            if (a.height !== b.height) {
-                return a.sign *
-                    (a.height > b.height ? 1 : -1);
+            const result =
+                this.compareAbs(a, b);
+
+            return a.sign > 0
+                ? result
+                : -result;
+        }
+
+        compareAbs(a, b) {
+            a = this.normalize(
+                this.parse(a)
+            );
+
+            b = this.normalize(
+                this.parse(b)
+            );
+
+            if (this.isZero(a)) {
+                return this.isZero(b)
+                    ? 0
+                    : -1;
             }
 
-            if (a.height === 0) {
-                const av = a.sign * a.mantissa;
-                const bv = b.sign * b.mantissa;
+            if (this.isZero(b)) {
+                return 1;
+            }
 
-                return av === bv
+            /*
+             * Both ordinary.
+             */
+            if (
+                a.exponent === null &&
+                b.exponent === null
+            ) {
+                return a.mantissa === b.mantissa
                     ? 0
-                    : av > bv
+                    : a.mantissa > b.mantissa
                         ? 1
                         : -1;
             }
 
-            if (a.exponent !== b.exponent) {
-                return a.sign *
-                    (
-                        a.exponent > b.exponent
-                            ? 1
-                            : -1
+            /*
+             * Ordinary vs scientific.
+             */
+            if (
+                a.exponent === null
+            ) {
+                const ec =
+                    this.compare(
+                        b.exponent,
+                        this.zero()
                     );
+
+                return ec > 0
+                    ? -1
+                    : 1;
             }
 
-            if (a.mantissa !== b.mantissa) {
-                return a.sign *
-                    (
-                        a.mantissa > b.mantissa
-                            ? 1
-                            : -1
+            if (
+                b.exponent === null
+            ) {
+                const ec =
+                    this.compare(
+                        a.exponent,
+                        this.zero()
                     );
+
+                return ec > 0
+                    ? 1
+                    : -1;
             }
 
-            return 0;
+            /*
+             * The exponent determines the order.
+             */
+            const ec =
+                this.compare(
+                    a.exponent,
+                    b.exponent
+                );
+
+            if (ec !== 0) {
+                return ec;
+            }
+
+            if (
+                a.mantissa ===
+                b.mantissa
+            ) {
+                return 0;
+            }
+
+            return a.mantissa >
+                b.mantissa
+                ? 1
+                : -1;
         }
+
+        /*
+         * ---------------------------------------------------------
+         * Addition
+         * ---------------------------------------------------------
+         */
 
         add(a, b) {
             a = this.parse(a);
             b = this.parse(b);
 
-            if (this.isZero(a)) {
-                return b;
+            if (this.isZero(a)) return b;
+            if (this.isZero(b)) return a;
+
+            /*
+             * Opposite signs.
+             */
+            if (a.sign !== b.sign) {
+                const cmp =
+                    this.compareAbs(a, b);
+
+                if (cmp === 0) {
+                    return this.zero();
+                }
+
+                if (cmp > 0) {
+                    const r =
+                        this.subtractAbs(
+                            a,
+                            b
+                        );
+
+                    r.sign = a.sign;
+
+                    return this.normalize(r);
+                }
+
+                const r =
+                    this.subtractAbs(
+                        b,
+                        a
+                    );
+
+                r.sign = b.sign;
+
+                return this.normalize(r);
             }
 
-            if (this.isZero(b)) {
-                return a;
-            }
+            const r =
+                this.addAbs(a, b);
 
+            r.sign = a.sign;
+
+            return this.normalize(r);
+        }
+
+        addAbs(a, b) {
+            /*
+             * Ordinary.
+             */
             if (
-                a.height === 0 &&
-                b.height === 0
+                a.exponent === null &&
+                b.exponent === null
             ) {
                 return this.fromNumber(
-                    a.sign * a.mantissa +
-                    b.sign * b.mantissa
+                    a.mantissa +
+                    b.mantissa
                 );
             }
 
+            /*
+             * Same exponent.
+             */
             if (
-                a.height === 1 &&
-                b.height === 1 &&
-                a.exponent === b.exponent
+                a.exponent !== null &&
+                b.exponent !== null &&
+                this.compare(
+                    a.exponent,
+                    b.exponent
+                ) === 0
             ) {
-                return this.normalize({
-                    sign: a.sign,
-                    mantissa:
+                return this.normalize(
+                    this.create(
+                        1,
                         a.mantissa +
-                        b.sign *
-                        a.sign *
                         b.mantissa,
-                    height: 1,
-                    exponent: a.exponent
-                });
+                        this.clone(
+                            a.exponent
+                        )
+                    )
+                );
             }
 
-            return this.compare(
-                this.format(a),
-                this.format(b)
-            ) >= 0
-                ? a
-                : b;
-        }
+            /*
+             * Different exponents.
+             *
+             * We do NOT simply take max(height).
+             *
+             * If the difference is numerically manageable,
+             * account for the smaller number.
+             */
+            const cmp =
+                this.compareAbs(a, b);
 
-        fromNumber(n) {
-            if (!Number.isFinite(n) || n === 0) {
-                return this.zero();
+            const larger =
+                cmp >= 0 ? a : b;
+
+            const smaller =
+                cmp >= 0 ? b : a;
+
+            if (
+                larger.exponent !== null &&
+                smaller.exponent !== null
+            ) {
+                const difference =
+                    this.subtract(
+                        larger.exponent,
+                        smaller.exponent
+                    );
+
+                const d =
+                    this.toNumber(
+                        difference
+                    );
+
+                if (
+                    Number.isFinite(d) &&
+                    d >= 0 &&
+                    d <= 20
+                ) {
+                    const correction =
+                        smaller.mantissa *
+                        Math.pow(
+                            10,
+                            -d
+                        );
+
+                    return this.normalize(
+                        this.create(
+                            1,
+                            larger.mantissa +
+                            correction,
+                            this.clone(
+                                larger.exponent
+                            )
+                        )
+                    );
+                }
             }
 
-            return this.normalize({
-                sign: n < 0 ? -1 : 1,
-                mantissa: Math.abs(n),
-                height: 0,
-                exponent: 0
-            });
+            /*
+             * Smaller term is below mantissa precision.
+             */
+            return this.clone(larger);
         }
 
         subtract(a, b) {
@@ -565,11 +898,105 @@
 
             b.sign *= -1;
 
-            return this.add(
-                this.format(a),
-                this.format(b)
-            );
+            return this.add(a, b);
         }
+
+        subtractAbs(a, b) {
+            const cmp =
+                this.compareAbs(a, b);
+
+            if (cmp === 0) {
+                return this.zero();
+            }
+
+            if (
+                a.exponent === null &&
+                b.exponent === null
+            ) {
+                return this.fromNumber(
+                    Math.abs(
+                        a.mantissa -
+                        b.mantissa
+                    )
+                );
+            }
+
+            if (
+                a.exponent !== null &&
+                b.exponent !== null &&
+                this.compare(
+                    a.exponent,
+                    b.exponent
+                ) === 0
+            ) {
+                return this.normalize(
+                    this.create(
+                        1,
+                        Math.abs(
+                            a.mantissa -
+                            b.mantissa
+                        ),
+                        this.clone(
+                            a.exponent
+                        )
+                    )
+                );
+            }
+
+            const larger =
+                cmp > 0 ? a : b;
+
+            const smaller =
+                cmp > 0 ? b : a;
+
+            if (
+                larger.exponent !== null &&
+                smaller.exponent !== null
+            ) {
+                const difference =
+                    this.subtract(
+                        larger.exponent,
+                        smaller.exponent
+                    );
+
+                const d =
+                    this.toNumber(
+                        difference
+                    );
+
+                if (
+                    Number.isFinite(d) &&
+                    d >= 0 &&
+                    d <= 20
+                ) {
+                    const correction =
+                        smaller.mantissa *
+                        Math.pow(
+                            10,
+                            -d
+                        );
+
+                    return this.normalize(
+                        this.create(
+                            1,
+                            larger.mantissa -
+                            correction,
+                            this.clone(
+                                larger.exponent
+                            )
+                        )
+                    );
+                }
+            }
+
+            return this.clone(larger);
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * Multiplication
+         * ---------------------------------------------------------
+         */
 
         multiply(a, b) {
             a = this.parse(a);
@@ -582,205 +1009,206 @@
                 return this.zero();
             }
 
+            const sign =
+                a.sign * b.sign;
+
+            /*
+             * Ordinary × ordinary.
+             */
             if (
-                a.height === 0 &&
-                b.height === 0
+                a.exponent === null &&
+                b.exponent === null
             ) {
                 return this.fromNumber(
-                    a.sign *
-                    b.sign *
+                    sign *
                     a.mantissa *
                     b.mantissa
                 );
             }
 
+            /*
+             * Ordinary × scientific.
+             */
             if (
-                a.height === 1 &&
-                b.height === 1
+                a.exponent === null
             ) {
-                let exponent =
-                    a.exponent +
-                    b.exponent;
-
-                let mantissa =
-                    a.mantissa *
-                    b.mantissa;
-
-                const shift =
-                    Math.floor(
-                        Math.log10(
-                            mantissa
+                return this.normalize(
+                    this.create(
+                        sign,
+                        a.mantissa *
+                        b.mantissa,
+                        this.clone(
+                            b.exponent
                         )
-                    );
-
-                mantissa /=
-                    Math.pow(
-                        10,
-                        shift
-                    );
-
-                exponent += shift;
-
-                return this.normalize({
-                    sign:
-                        a.sign *
-                        b.sign,
-                    mantissa,
-                    height: 1,
-                    exponent
-                });
-            }
-
-            const cmp =
-                this.compare(
-                    this.format(a),
-                    this.format(b)
-                );
-
-            return this.normalize({
-                sign:
-                    a.sign *
-                    b.sign,
-                mantissa:
-                    a.mantissa *
-                    b.mantissa,
-                height:
-                    Math.max(
-                        a.height,
-                        b.height
-                    ),
-                exponent:
-                    cmp >= 0
-                        ? a.exponent
-                        : b.exponent
-            });
-        }
-
-        divide(a, b) {
-            a = this.parse(a);
-            b = this.parse(b);
-
-            if (this.isZero(b)) {
-                return this.zero();
-            }
-
-            if (this.isZero(a)) {
-                return this.zero();
-            }
-
-            if (
-                a.height === 0 &&
-                b.height === 0
-            ) {
-                return this.fromNumber(
-                    (
-                        a.sign *
-                        a.mantissa
-                    ) /
-                    (
-                        b.sign *
-                        b.mantissa
                     )
                 );
             }
 
             if (
-                a.height === 1 &&
-                b.height === 1
+                b.exponent === null
             ) {
-                let mantissa =
-                    a.mantissa /
-                    b.mantissa;
-
-                let exponent =
-                    a.exponent -
-                    b.exponent;
-
-                const shift =
-                    Math.floor(
-                        Math.log10(
-                            Math.abs(
-                                mantissa
-                            )
+                return this.normalize(
+                    this.create(
+                        sign,
+                        a.mantissa *
+                        b.mantissa,
+                        this.clone(
+                            a.exponent
                         )
-                    );
-
-                mantissa /=
-                    Math.pow(
-                        10,
-                        shift
-                    );
-
-                exponent += shift;
-
-                return this.normalize({
-                    sign:
-                        a.sign *
-                        b.sign,
-                    mantissa,
-                    height: 1,
-                    exponent
-                });
+                    )
+                );
             }
 
-            return this.normalize({
-                sign:
-                    a.sign *
-                    b.sign,
-                mantissa:
+            /*
+             * (a × 10^A)(b × 10^B)
+             *
+             * = ab × 10^(A+B)
+             */
+            return this.normalize(
+                this.create(
+                    sign,
+                    a.mantissa *
+                    b.mantissa,
+                    this.add(
+                        a.exponent,
+                        b.exponent
+                    )
+                )
+            );
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * Division
+         * ---------------------------------------------------------
+         */
+
+        divide(a, b) {
+            a = this.parse(a);
+            b = this.parse(b);
+
+            if (
+                this.isZero(b)
+            ) {
+                return this.zero();
+            }
+
+            if (
+                this.isZero(a)
+            ) {
+                return this.zero();
+            }
+
+            const sign =
+                a.sign * b.sign;
+
+            /*
+             * Ordinary / ordinary.
+             */
+            if (
+                a.exponent === null &&
+                b.exponent === null
+            ) {
+                return this.fromNumber(
+                    sign *
+                    a.mantissa /
+                    b.mantissa
+                );
+            }
+
+            /*
+             * Ordinary / scientific.
+             */
+            if (
+                a.exponent === null
+            ) {
+                return this.normalize(
+                    this.create(
+                        sign,
+                        a.mantissa /
+                        b.mantissa,
+                        this.negateValue(
+                            b.exponent
+                        )
+                    )
+                );
+            }
+
+            /*
+             * Scientific / ordinary.
+             */
+            if (
+                b.exponent === null
+            ) {
+                return this.normalize(
+                    this.create(
+                        sign,
+                        a.mantissa /
+                        b.mantissa,
+                        this.clone(
+                            a.exponent
+                        )
+                    )
+                );
+            }
+
+            /*
+             * (a × 10^A)/(b × 10^B)
+             *
+             * = a/b × 10^(A-B)
+             */
+            return this.normalize(
+                this.create(
+                    sign,
                     a.mantissa /
                     b.mantissa,
-                height:
-                    Math.max(
-                        a.height,
-                        b.height
-                    ),
-                exponent:
-                    a.exponent -
-                    b.exponent
-            });
+                    this.subtract(
+                        a.exponent,
+                        b.exponent
+                    )
+                )
+            );
         }
+
+        /*
+         * ---------------------------------------------------------
+         * Powers
+         * ---------------------------------------------------------
+         */
 
         tenPower(x) {
             x = this.parse(x);
 
             if (this.isZero(x)) {
-                return this.fromNumber(1);
+                return this.one();
             }
 
-            if (x.height === 0) {
-                return this.normalize({
-                    sign: 1,
-                    mantissa: 1,
-                    height: 1,
-                    exponent:
-                        x.sign *
-                        x.mantissa
-                });
-            }
-
-            return this.normalize({
-                sign: 1,
-                mantissa: 1,
-                height:
-                    x.height + 1,
-                exponent:
-                    x.exponent
-            });
+            /*
+             * 10^x = 1eX
+             */
+            return this.normalize(
+                this.create(
+                    1,
+                    1,
+                    this.clone(x)
+                )
+            );
         }
 
         power(a, b) {
             a = this.parse(a);
             b = this.parse(b);
 
-            if (
-                b.height === 0 &&
-                b.sign > 0 &&
-                b.mantissa === 0
-            ) {
-                return this.fromNumber(1);
+            /*
+             * x^0 = 1
+             */
+            if (this.isZero(b)) {
+                return this.one();
             }
 
+            /*
+             * 0^positive = 0
+             */
             if (
                 this.isZero(a) &&
                 b.sign > 0
@@ -788,137 +1216,405 @@
                 return this.zero();
             }
 
-            if (
-                a.sign === 1 &&
-                a.height === 0 &&
-                a.mantissa === 10
-            ) {
-                return this.tenPower(
-                    this.format(b)
-                );
-            }
+            const av =
+                this.toNumber(a);
 
-            const av = this.toNumber(a);
-            const bv = this.toNumber(b);
+            const bv =
+                this.toNumber(b);
 
+            /*
+             * Ordinary finite arithmetic.
+             */
             if (
                 Number.isFinite(av) &&
-                Number.isFinite(bv) &&
-                Math.abs(bv) < 100000
+                Number.isFinite(bv)
             ) {
                 const result =
-                    Math.pow(av, bv);
+                    Math.pow(
+                        av,
+                        bv
+                    );
 
                 if (
                     Number.isFinite(result)
                 ) {
-                    return this.fromNumber(result);
-                }
-            }
-
-            if (
-                av > 0 &&
-                Number.isFinite(av) &&
-                Number.isFinite(bv)
-            ) {
-                const exponent =
-                    bv *
-                    Math.log10(av);
-
-                if (
-                    Number.isFinite(exponent)
-                ) {
-                    return this.tenPower(
-                        String(exponent)
+                    return this.fromNumber(
+                        result
                     );
                 }
             }
 
-            return this.zero();
+            /*
+             * Negative base.
+             */
+            if (a.sign < 0) {
+                if (
+                    b.exponent !== null ||
+                    !Number.isInteger(
+                        b.sign *
+                        b.mantissa
+                    )
+                ) {
+                    return this.zero();
+                }
+
+                const exponent =
+                    b.sign *
+                    b.mantissa;
+
+                const positive =
+                    this.absValue(a);
+
+                const absoluteExponent =
+                    Math.abs(
+                        exponent
+                    );
+
+                let result =
+                    this.power(
+                        positive,
+                        this.fromNumber(
+                            absoluteExponent
+                        )
+                    );
+
+                if (
+                    exponent < 0
+                ) {
+                    result =
+                        this.divide(
+                            this.one(),
+                            result
+                        );
+                }
+
+                if (
+                    absoluteExponent % 2 !== 0
+                ) {
+                    result.sign *= -1;
+                }
+
+                return result;
+            }
+
+            /*
+             * a^b = 10^(b × log10(a))
+             */
+            const exponent =
+                this.multiply(
+                    b,
+                    this.log10(a)
+                );
+
+            return this.tenPower(
+                exponent
+            );
         }
+
+        /*
+         * ---------------------------------------------------------
+         * Logarithm
+         * ---------------------------------------------------------
+         */
 
         log10(x) {
             x = this.parse(x);
 
-            if (this.isZero(x)) {
+            if (
+                this.isZero(x) ||
+                x.sign < 0
+            ) {
                 return this.zero();
             }
 
-            if (x.height === 0) {
-                const n =
-                    x.sign *
-                    x.mantissa;
-
-                if (n <= 0) {
-                    return this.zero();
-                }
-
+            if (
+                x.exponent === null
+            ) {
                 return this.fromNumber(
-                    Math.log10(n)
+                    Math.log10(
+                        x.mantissa
+                    )
                 );
             }
 
-            if (x.height === 1) {
-                return this.fromNumber(
-                    x.exponent
-                );
-            }
-
-            return this.normalize({
-                sign: x.sign,
-                mantissa: 1,
-                height:
-                    x.height - 1,
-                exponent:
-                    x.exponent
-            });
+            /*
+             * log10(m × 10^E)
+             * =
+             * log10(m) + E
+             */
+            return this.add(
+                x.exponent,
+                this.fromNumber(
+                    Math.log10(
+                        x.mantissa
+                    )
+                )
+            );
         }
+
+        /*
+         * ---------------------------------------------------------
+         * Helpers
+         * ---------------------------------------------------------
+         */
+
+        absValue(x) {
+            x = this.clone(x);
+
+            if (!this.isZero(x)) {
+                x.sign = 1;
+            }
+
+            return x;
+        }
+
+        negateValue(x) {
+            x = this.clone(x);
+
+            if (!this.isZero(x)) {
+                x.sign *= -1;
+            }
+
+            return x;
+        }
+
+        toNumber(x) {
+            x = this.parse(x);
+
+            if (this.isZero(x)) {
+                return 0;
+            }
+
+            if (
+                x.exponent === null
+            ) {
+                return (
+                    x.sign *
+                    x.mantissa
+                );
+            }
+
+            const exponent =
+                this.toNumber(
+                    x.exponent
+                );
+
+            if (
+                !Number.isFinite(
+                    exponent
+                )
+            ) {
+                return x.sign > 0
+                    ? Infinity
+                    : -Infinity;
+            }
+
+            if (exponent > 308) {
+                return x.sign > 0
+                    ? Infinity
+                    : -Infinity;
+            }
+
+            if (exponent < -324) {
+                return 0;
+            }
+
+            return (
+                x.sign *
+                x.mantissa *
+                Math.pow(
+                    10,
+                    exponent
+                )
+            );
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * Formatting
+         * ---------------------------------------------------------
+         */
+
+format(x) {
+    x = this.normalize(
+        this.parse(x)
+    );
+
+    if (this.isZero(x)) {
+        return '0';
+    }
+
+    const sign =
+        x.sign < 0 ? '-' : '';
+
+    if (x.exponent === null) {
+        return String(
+            x.sign * x.mantissa
+        );
+    }
+
+    let mantissa =
+        Number(
+            x.mantissa.toPrecision(15)
+        ).toString();
+
+    if (mantissa.endsWith('.0')) {
+        mantissa =
+            mantissa.slice(0, -2);
+    }
+
+    return (
+        sign +
+        mantissa +
+        'e' +
+        this.formatExponent(x.exponent)
+    );
+}
+
+formatExponent(x) {
+    x = this.normalize(
+        this.parse(x)
+    );
+
+    if (this.isZero(x)) {
+        return '0';
+    }
+
+    /*
+     * Ordinary exponent.
+     *
+     * A mantissa of 1 is implicit after an e:
+     *
+     *     1e1 -> e1
+     */
+    if (x.exponent === null) {
+        if (
+            x.sign === 1 &&
+            x.mantissa === 1
+        ) {
+            return '';
+        }
+
+        return String(
+            x.sign * x.mantissa
+        );
+    }
+
+    /*
+     * Scientific exponent.
+     *
+     * If its mantissa is 1, it is implicit:
+     *
+     *     1e8      -> e8
+     *     1e1e10   -> ee10
+     *     1e1e1e10 -> eee10
+     */
+    const sign =
+        x.sign < 0 ? '-' : '';
+
+    let mantissa =
+        Number(
+            x.mantissa.toPrecision(15)
+        ).toString();
+
+    if (mantissa.endsWith('.0')) {
+        mantissa =
+            mantissa.slice(0, -2);
+    }
+
+    if (
+        x.sign === 1 &&
+        x.mantissa === 1
+    ) {
+        return (
+            'e' +
+            this.formatExponent(x.exponent)
+        );
+    }
+
+    return (
+        sign +
+        mantissa +
+        'e' +
+        this.formatExponent(x.exponent)
+    );
+}
+
+
+
+
+        /*
+         * ---------------------------------------------------------
+         * Scratch blocks
+         * ---------------------------------------------------------
+         */
 
         make(args) {
             return this.format(
-                this.parse(args.VALUE)
+                this.parse(
+                    args.VALUE
+                )
             );
         }
 
         addBlock(args) {
             return this.format(
-                this.add(args.A, args.B)
+                this.add(
+                    args.A,
+                    args.B
+                )
             );
         }
 
         subtractBlock(args) {
             return this.format(
-                this.subtract(args.A, args.B)
+                this.subtract(
+                    args.A,
+                    args.B
+                )
             );
         }
 
         multiplyBlock(args) {
             return this.format(
-                this.multiply(args.A, args.B)
+                this.multiply(
+                    args.A,
+                    args.B
+                )
             );
         }
 
         divideBlock(args) {
             return this.format(
-                this.divide(args.A, args.B)
+                this.divide(
+                    args.A,
+                    args.B
+                )
             );
         }
 
         powerBlock(args) {
             return this.format(
-                this.power(args.A, args.B)
+                this.power(
+                    args.A,
+                    args.B
+                )
             );
         }
 
         tenPowerBlock(args) {
             return this.format(
-                this.tenPower(args.A)
+                this.tenPower(
+                    args.A
+                )
             );
         }
 
         log10Block(args) {
             return this.format(
-                this.log10(args.A)
+                this.log10(
+                    args.A
+                )
             );
         }
 
@@ -929,68 +1625,88 @@
                     args.B
                 );
 
-            switch (String(args.OP)) {
+            switch (
+                String(args.OP)
+            ) {
                 case '>':
                     return c > 0;
+
                 case '<':
                     return c < 0;
+
                 case '=':
                     return c === 0;
+
                 case '>=':
                     return c >= 0;
+
                 case '<=':
                     return c <= 0;
+
                 default:
                     return false;
             }
         }
 
         equal(args) {
-            return this.compare(
-                args.A,
-                args.B
-            ) === 0;
+            return (
+                this.compare(
+                    args.A,
+                    args.B
+                ) === 0
+            );
         }
 
         greater(args) {
-            return this.compare(
-                args.A,
-                args.B
-            ) > 0;
+            return (
+                this.compare(
+                    args.A,
+                    args.B
+                ) > 0
+            );
         }
 
         less(args) {
-            return this.compare(
-                args.A,
-                args.B
-            ) < 0;
+            return (
+                this.compare(
+                    args.A,
+                    args.B
+                ) < 0
+            );
         }
 
         abs(args) {
-            const x =
-                this.parse(args.A);
-
-            x.sign =
-                Math.abs(x.sign);
-
-            return this.format(x);
+            return this.format(
+                this.absValue(
+                    this.parse(
+                        args.A
+                    )
+                )
+            );
         }
 
         negate(args) {
-            const x =
-                this.parse(args.A);
-
-            if (!this.isZero(x)) {
-                x.sign *= -1;
-            }
-
-            return this.format(x);
+            return this.format(
+                this.negateValue(
+                    this.parse(
+                        args.A
+                    )
+                )
+            );
         }
+
+        /*
+         * ---------------------------------------------------------
+         * Tetration
+         * ---------------------------------------------------------
+         */
 
         tetrate(args) {
             let h =
                 Math.floor(
-                    Number(args.HEIGHT)
+                    Number(
+                        args.HEIGHT
+                    )
                 );
 
             if (!Number.isFinite(h)) {
@@ -1000,7 +1716,10 @@
             h =
                 Math.max(
                     0,
-                    Math.min(h, 1000)
+                    Math.min(
+                        h,
+                        1000
+                    )
                 );
 
             if (h === 0) {
@@ -1008,7 +1727,7 @@
             }
 
             let result =
-                this.parse('10');
+                this.fromNumber(10);
 
             for (
                 let i = 1;
@@ -1017,11 +1736,13 @@
             ) {
                 result =
                     this.tenPower(
-                        this.format(result)
+                        result
                     );
             }
 
-            return this.format(result);
+            return this.format(
+                result
+            );
         }
     }
 
