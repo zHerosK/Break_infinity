@@ -3,9 +3,7 @@
 This is a TurboWarp extension made for [elementarygraduate](https://scratch.mit.edu/users/elementarygraduate/) on Scratch.
 
 It allows working with very large numbers using an extended scientific notation, such as `1e8` or `2ee9`.
-
 MIT licensed, so you are free to use, modify and redistribute the code. No credit is required.
-
 ## Scientific notation
 
 The rules for the notation, as well as the original idea behind this extension, come from [elementarygraduate](https://scratch.mit.edu/users/elementarygraduate/). The JavaScript code was written by [zHerosK](https://scratch.mit.edu/users/zHerosK/).
@@ -106,6 +104,6 @@ More information about TurboWarp extensions can be found in the [official docume
 
 ## License
 
-MIT License.
+[MIT License](https://github.com/zHerosK/Break_infinity/blob/main/LICENSE).
 
 You can use, modify and redistribute this code freely. No credit is required.
